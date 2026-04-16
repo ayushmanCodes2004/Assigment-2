@@ -1,6 +1,13 @@
 # Task Management API
 
-A full-featured RESTful API for managing tasks and users, built with Node.js and Express. This project demonstrates a clean architecture with dual database integration: PostgreSQL for user management and MongoDB for task storage.
+A full-featured RESTful API for managing tasks and users with real-time notifications, built with Node.js and Express. This project demonstrates a clean architecture with dual database integration: PostgreSQL for user management and MongoDB for task storage.
+
+-**Real-time Task Reminders** - Automatic notifications 1 hour before due date
+-**Task Categorization** - Organize tasks with pre-defined categories
+-**Task Tags** - Add multiple custom tags to tasks
+-**Webhook Integration** - External notifications on task completion
+-**Retry Logic** - Exponential backoff for webhook delivery
+-**Enhanced Filtering** - Filter by category, tags, and status
 
 ## Table of Contents
 
@@ -9,35 +16,47 @@ A full-featured RESTful API for managing tasks and users, built with Node.js and
 - [Getting Started](#getting-started)
 - [Database Setup](#database-setup)
 - [API Documentation](#api-documentation)
+- [New Features](#new-features)
 - [Project Structure](#project-structure)
 - [Design Decisions](#design-decisions)
 - [Security](#security)
 
 ## Features
 
-**User Authentication**
+### User Authentication
 - Secure registration with email validation
 - Login with JWT token generation
 - Protected routes requiring authentication
-- Password hashing with bcrypt
+- Password hashing with bcrypt (12 salt rounds)
 
-**Task Management**
+### Task Management
 - Create, read, update, and delete tasks
 - Task isolation (users can only access their own tasks)
 - Pagination and filtering support
 - Status tracking (pending/completed)
+- **NEW:** Task categorization (6 pre-defined categories)
+- **NEW:** Multiple tags per task
+- **NEW:** Filter by category and tags
 
-**Security & Validation**
+### Real-time Notifications
+- **NEW:** Automatic reminders 1 hour before task due date
+- **NEW:** Webhook notifications on task completion
+- **NEW:** Console logging for all notifications
+- **NEW:** Retry logic with exponential backoff
+
+### Security & Validation
 - Input validation using Joi
 - JWT-based authentication
 - Environment variable protection
 - CORS support
+- User data isolation
 
-**Developer Experience**
+### Developer Experience
 - Clean, modular code structure
 - Comprehensive error handling
 - RESTful API design
 - Easy local setup
+- Extensive documentation
 
 ## Tech Stack
 
@@ -49,6 +68,8 @@ A full-featured RESTful API for managing tasks and users, built with Node.js and
 - **Authentication**: JSON Web Tokens (JWT)
 - **Validation**: Joi
 - **Password Hashing**: bcryptjs
+- **HTTP Client**: axios (for webhooks)
+- **Scheduling**: node-cron
 - **Environment Management**: dotenv
 
 ## Getting Started
@@ -94,18 +115,32 @@ Make sure you have the following installed on your system:
    PG_PASSWORD=your_postgres_password
    
    MONGODB_URI=mongodb://localhost:27017/taskmanagement
+   
+   # NEW: Webhook Configuration
+   WEBHOOK_URL=https://webhook.site/your-unique-url
+   WEBHOOK_RETRY_ATTEMPTS=3
+   WEBHOOK_RETRY_DELAY=1000
+   
+   # NEW: Reminder Configuration
+   REMINDER_CHECK_INTERVAL=60000
+   REMINDER_ADVANCE_TIME=3600000
    ```
 
-4. **Set up databases** (see [Database Setup](#database-setup) section below)
+4. **Get a Webhook URL** (Optional but recommended)
+   - Visit [webhook.site](https://webhook.site)
+   - Copy your unique URL
+   - Paste it in `.env` as `WEBHOOK_URL`
 
-5. **Start the server**
+5. **Set up databases** (see [Database Setup](#database-setup) section below)
+
+6. **Start the server**
    ```bash
    npm run dev
    ```
    
    The server will start on `http://localhost:3000` (or your configured PORT)
 
-6. **Verify the server is running**
+7. **Verify the server is running**
    ```bash
    curl http://localhost:3000/health
    ```
@@ -153,16 +188,7 @@ Make sure you have the following installed on your system:
    \q
    ```
 
-3. **The users table will be created automatically** when you start the server for the first time. The schema is:
-   ```sql
-   CREATE TABLE users (
-     id SERIAL PRIMARY KEY,
-     email VARCHAR(255) UNIQUE NOT NULL,
-     password VARCHAR(255) NOT NULL,
-     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-   );
-   ```
+3. **The users table will be created automatically** when you start the server for the first time.
 
 ### MongoDB Setup
 
@@ -185,7 +211,7 @@ Make sure you have the following installed on your system:
    mongo
    ```
 
-3. **The database and collection will be created automatically** when you create your first task. MongoDB creates databases and collections on-the-fly.
+3. **The database and collection will be created automatically** when you create your first task.
 
 ### Verify Database Connections
 
@@ -193,11 +219,10 @@ When you start the server, you should see these messages:
 ```
 PostgreSQL tables initialized
 MongoDB connected successfully
+Reminder service started
 Server running on port 3000
 Environment: development
 ```
-
-If you see any errors, double-check your `.env` file configuration and ensure both database services are running.
 
 ## API Documentation
 
@@ -214,231 +239,153 @@ Authorization: Bearer <your_jwt_token>
 
 ---
 
-### 1. User Registration
+### Authentication Endpoints
 
-**Endpoint**: `POST /api/auth/register`
+#### 1. User Registration
+**POST** `/api/auth/register`
 
-**Description**: Register a new user account
+Register a new user account.
 
 **Request Body**:
 ```json
 {
-  "email": "xyz@example.com",
-  "password": "securePassword123"
+  "email": "user@example.com",
+  "password": "password123"
 }
 ```
 
-**Validation Rules**:
-- Email must be valid format
-- Password must be at least 6 characters
-- Email must be unique
-
-**Success Response** (201 Created):
+**Success Response** (201):
 ```json
 {
   "message": "User registered successfully",
   "user": {
     "id": 1,
-    "email": "xyz@example.com",
+    "email": "user@example.com",
     "createdAt": "2024-01-15T10:30:00.000Z"
   },
   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
 
-**Error Response** (400 Bad Request):
-```json
-{
-  "error": "User with this email already exists"
-}
-```
+#### 2. User Login
+**POST** `/api/auth/login`
 
-**cURL Example**:
-```bash
-curl -X POST http://localhost:3000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "xyz@example.com",
-    "password": "securePassword123"
-  }'
-```
-
----
-
-### 2. User Login
-
-**Endpoint**: `POST /api/auth/login`
-
-**Description**: Login with existing credentials
+Login with existing credentials.
 
 **Request Body**:
 ```json
 {
-  "email": "xyz@example.com",
-  "password": "securePassword123"
+  "email": "user@example.com",
+  "password": "password123"
 }
 ```
 
-**Success Response** (200 OK):
+**Success Response** (200):
 ```json
 {
   "message": "Login successful",
   "user": {
     "id": 1,
-    "email": "xyz@example.com"
+    "email": "user@example.com"
   },
   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
 
-**Error Response** (401 Unauthorized):
-```json
-{
-  "error": "Invalid email or password"
-}
-```
+#### 3. Get User Profile
+**GET** `/api/auth/profile`
 
-**cURL Example**:
-```bash
-curl -X POST http://localhost:3000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "xyz@example.com",
-    "password": "securePassword123"
-  }'
-```
+Get the authenticated user's profile. Requires authentication.
 
----
-
-### 3. Get User Profile
-
-**Endpoint**: `GET /api/auth/profile`
-
-**Description**: Get the authenticated user's profile
-
-**Authentication**: Required
-
-**Success Response** (200 OK):
+**Success Response** (200):
 ```json
 {
   "user": {
     "id": 1,
-    "email": "xyz@example.com",
+    "email": "user@example.com",
     "createdAt": "2024-01-15T10:30:00.000Z"
   }
 }
 ```
 
-**Error Response** (401 Unauthorized):
-```json
-{
-  "error": "Access denied. No token provided."
-}
-```
-
-**cURL Example**:
-```bash
-curl -X GET http://localhost:3000/api/auth/profile \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
-```
-
 ---
 
-### 4. Create Task
+### Task Endpoints
 
-**Endpoint**: `POST /api/tasks`
+#### 4. Create Task (Enhanced)
+**POST** `/api/tasks`
 
-**Description**: Create a new task for the authenticated user
-
-**Authentication**: Required
+Create a new task. Requires authentication.
 
 **Request Body**:
 ```json
 {
   "title": "Complete project documentation",
-  "description": "Write comprehensive README and API docs",
+  "description": "Write comprehensive README",
   "dueDate": "2024-12-31T23:59:59.000Z",
-  "status": "pending"
+  "status": "pending",
+  "category": "Work",
+  "tags": ["High Priority", "Documentation"]
 }
 ```
 
-**Field Details**:
-- `title` (required): String, max 200 characters
-- `description` (optional): String, max 1000 characters
-- `dueDate` (required): ISO 8601 date format
-- `status` (optional): "pending" or "completed" (defaults to "pending")
+**New Fields**:
+- `category` (optional): One of: Work, Personal, Urgent, Shopping, Health, Other
+- `tags` (optional): Array of strings, max 50 characters each
 
-**Success Response** (201 Created):
+**Success Response** (201):
 ```json
 {
   "message": "Task created successfully",
   "task": {
     "_id": "65a1b2c3d4e5f6g7h8i9j0k1",
     "title": "Complete project documentation",
-    "description": "Write comprehensive README and API docs",
+    "description": "Write comprehensive README",
     "dueDate": "2024-12-31T23:59:59.000Z",
     "status": "pending",
+    "category": "Work",
+    "tags": ["High Priority", "Documentation"],
     "userId": 1,
+    "reminderSent": false,
     "createdAt": "2024-01-15T10:30:00.000Z",
     "updatedAt": "2024-01-15T10:30:00.000Z"
   }
 }
 ```
 
-**Error Response** (400 Bad Request):
-```json
-{
-  "error": "Validation Error",
-  "details": [
-    "Title is required",
-    "Due date must be a valid ISO date"
-  ]
-}
-```
+**Note**: A reminder will be automatically scheduled for 1 hour before the due date.
 
-**cURL Example**:
-```bash
-curl -X POST http://localhost:3000/api/tasks \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Complete project documentation",
-    "description": "Write comprehensive README and API docs",
-    "dueDate": "2024-12-31T23:59:59.000Z",
-    "status": "pending"
-  }'
-```
+#### 5. Get All Tasks (Enhanced)
+**GET** `/api/tasks`
 
----
-
-### 5. Get All Tasks
-
-**Endpoint**: `GET /api/tasks`
-
-**Description**: Get all tasks for the authenticated user with pagination and filtering
-
-**Authentication**: Required
+Get all tasks for the authenticated user. Requires authentication.
 
 **Query Parameters**:
 - `status` (optional): Filter by status ("pending" or "completed")
+- `category` (optional): Filter by category
+- `tags` (optional): Filter by tags (comma-separated)
 - `page` (optional): Page number (default: 1)
 - `limit` (optional): Items per page (default: 10)
 
-**Success Response** (200 OK):
+**Examples**:
+```bash
+# Get all tasks
+GET /api/tasks
+
+# Filter by category
+GET /api/tasks?category=Work
+
+# Filter by tags
+GET /api/tasks?tags=High Priority,Documentation
+
+# Combined filters
+GET /api/tasks?category=Work&status=pending&page=1
+```
+
+**Success Response** (200):
 ```json
 {
-  "tasks": [
-    {
-      "_id": "65a1b2c3d4e5f6g7h8i9j0k1",
-      "title": "Complete project documentation",
-      "description": "Write comprehensive README and API docs",
-      "dueDate": "2024-12-31T23:59:59.000Z",
-      "status": "pending",
-      "userId": 1,
-      "createdAt": "2024-01-15T10:30:00.000Z",
-      "updatedAt": "2024-01-15T10:30:00.000Z"
-    }
-  ],
+  "tasks": [...],
   "pagination": {
     "currentPage": 1,
     "totalPages": 3,
@@ -450,164 +397,85 @@ curl -X POST http://localhost:3000/api/tasks \
 }
 ```
 
-**cURL Examples**:
-```bash
-# Get all tasks
-curl -X GET http://localhost:3000/api/tasks \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+#### 6. Get Single Task
+**GET** `/api/tasks/:id`
 
-# Get pending tasks only
-curl -X GET "http://localhost:3000/api/tasks?status=pending" \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+Get a specific task by ID. Requires authentication.
 
-# Get page 2 with 20 items per page
-curl -X GET "http://localhost:3000/api/tasks?page=2&limit=20" \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
-```
+#### 7. Update Task (Enhanced)
+**PUT** `/api/tasks/:id`
 
----
+Update a task. Requires authentication. All fields are optional.
 
-### 6. Get Single Task
-
-**Endpoint**: `GET /api/tasks/:id`
-
-**Description**: Get a specific task by ID (only if it belongs to the authenticated user)
-
-**Authentication**: Required
-
-**URL Parameters**:
-- `id`: MongoDB ObjectId of the task
-
-**Success Response** (200 OK):
-```json
-{
-  "task": {
-    "_id": "65a1b2c3d4e5f6g7h8i9j0k1",
-    "title": "Complete project documentation",
-    "description": "Write comprehensive README and API docs",
-    "dueDate": "2024-12-31T23:59:59.000Z",
-    "status": "pending",
-    "userId": 1,
-    "createdAt": "2024-01-15T10:30:00.000Z",
-    "updatedAt": "2024-01-15T10:30:00.000Z"
-  }
-}
-```
-
-**Error Response** (404 Not Found):
-```json
-{
-  "error": "Task not found"
-}
-```
-
-**cURL Example**:
-```bash
-curl -X GET http://localhost:3000/api/tasks/65a1b2c3d4e5f6g7h8i9j0k1 \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
-```
-
----
-
-### 7. Update Task
-
-**Endpoint**: `PUT /api/tasks/:id`
-
-**Description**: Update a task (partial updates allowed, only if it belongs to the authenticated user)
-
-**Authentication**: Required
-
-**URL Parameters**:
-- `id`: MongoDB ObjectId of the task
-
-**Request Body** (all fields optional):
+**Request Body**:
 ```json
 {
   "title": "Updated title",
-  "description": "Updated description",
-  "dueDate": "2024-12-31T23:59:59.000Z",
-  "status": "completed"
+  "status": "completed",
+  "category": "Personal",
+  "tags": ["Updated", "New Tag"]
 }
 ```
 
-**Success Response** (200 OK):
+**Behavior**:
+- If `status` changes to "completed": Sends webhook notification
+- If `dueDate` is updated: Reschedules reminder
+
+#### 8. Delete Task
+**DELETE** `/api/tasks/:id`
+
+Delete a task. Requires authentication. Cancels any scheduled reminders.
+
+---
+
+### New Endpoints
+
+#### 9. Get Categories
+**GET** `/api/tasks/categories`
+
+Get all available task categories. Requires authentication.
+
+**Success Response** (200):
 ```json
 {
-  "message": "Task updated successfully",
-  "task": {
-    "_id": "65a1b2c3d4e5f6g7h8i9j0k1",
-    "title": "Updated title",
-    "description": "Updated description",
-    "dueDate": "2024-12-31T23:59:59.000Z",
-    "status": "completed",
-    "userId": 1,
-    "createdAt": "2024-01-15T10:30:00.000Z",
-    "updatedAt": "2024-01-15T14:45:00.000Z"
-  }
+  "categories": [
+    "Work",
+    "Personal",
+    "Urgent",
+    "Shopping",
+    "Health",
+    "Other"
+  ]
 }
 ```
 
-**Error Response** (404 Not Found):
+#### 10. Get User Tags
+**GET** `/api/tasks/tags`
+
+Get all unique tags used by the authenticated user. Requires authentication.
+
+**Success Response** (200):
 ```json
 {
-  "error": "Task not found"
+  "tags": [
+    "Bug Fix",
+    "Documentation",
+    "High Priority",
+    "Meeting"
+  ]
 }
-```
-
-**cURL Example**:
-```bash
-curl -X PUT http://localhost:3000/api/tasks/65a1b2c3d4e5f6g7h8i9j0k1 \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "status": "completed"
-  }'
 ```
 
 ---
 
-### 8. Delete Task
+### Health Check
 
-**Endpoint**: `DELETE /api/tasks/:id`
+#### 11. Health Check
+**GET** `/health`
 
-**Description**: Delete a task (only if it belongs to the authenticated user)
+Check if the server is running. No authentication required.
 
-**Authentication**: Required
-
-**URL Parameters**:
-- `id`: MongoDB ObjectId of the task
-
-**Success Response** (200 OK):
-```json
-{
-  "message": "Task deleted successfully"
-}
-```
-
-**Error Response** (404 Not Found):
-```json
-{
-  "error": "Task not found"
-}
-```
-
-**cURL Example**:
-```bash
-curl -X DELETE http://localhost:3000/api/tasks/65a1b2c3d4e5f6g7h8i9j0k1 \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
-```
-
----
-
-### 9. Health Check
-
-**Endpoint**: `GET /health`
-
-**Description**: Check if the server is running
-
-**Authentication**: Not required
-
-**Success Response** (200 OK):
+**Success Response** (200):
 ```json
 {
   "status": "OK",
@@ -616,88 +484,159 @@ curl -X DELETE http://localhost:3000/api/tasks/65a1b2c3d4e5f6g7h8i9j0k1 \
 }
 ```
 
-**cURL Example**:
+---
+
+## New Features
+
+### 1. Real-time Task Reminders
+
+**How it works**:
+- When you create a task, a reminder is automatically scheduled
+- The system checks every minute for tasks due within the next hour
+- When a task's due date is approaching (1 hour before), a reminder is triggered
+- Reminders are logged to console and sent to the configured webhook URL
+
+**Console Output Example**:
+```
+=== TASK REMINDER ===
+Task ID: 65a1b2c3d4e5f6g7h8i9j0k1
+Title: Complete project documentation
+Due Date: 2024-01-15T15:30:00.000Z
+User ID: 1
+Category: Work
+Tags: High Priority, Documentation
+====================
+Reminder sent for task: 65a1b2c3d4e5f6g7h8i9j0k1
+```
+
+**Configuration**:
+```env
+REMINDER_CHECK_INTERVAL=60000      # Check every 60 seconds
+REMINDER_ADVANCE_TIME=3600000      # Remind 1 hour before (in milliseconds)
+```
+
+### 2. Task Categorization
+
+**Pre-defined Categories**:
+- Work
+- Personal
+- Urgent
+- Shopping
+- Health
+- Other (default)
+
+**Benefits**:
+- Consistent categorization across users
+- Easy filtering and organization
+- Better for analytics and reporting
+
+**Usage**:
 ```bash
-curl -X GET http://localhost:3000/health
+# Create task with category
+POST /api/tasks
+{
+  "title": "Buy groceries",
+  "category": "Shopping",
+  ...
+}
+
+# Filter by category
+GET /api/tasks?category=Work
+```
+
+### 3. Task Tags
+
+**Features**:
+- Add multiple tags to each task
+- Free-form text (max 50 characters per tag)
+- Filter by single or multiple tags
+- Get all your tags for autocomplete
+
+**Usage**:
+```bash
+# Create task with tags
+POST /api/tasks
+{
+  "title": "Fix bug",
+  "tags": ["High Priority", "Bug Fix", "Client A"],
+  ...
+}
+
+# Filter by tags
+GET /api/tasks?tags=High Priority,Bug Fix
+
+# Get all your tags
+GET /api/tasks/tags
+```
+
+### 4. Webhook Integration
+
+**Triggers**:
+- Task completion
+- Task reminders
+
+**Features**:
+- Configurable webhook URL
+- Retry logic with exponential backoff
+- 3 retry attempts (delays: 1s, 2s, 4s)
+- Detailed logging
+
+**Webhook Payload Example**:
+```json
+{
+  "type": "task_completed",
+  "timestamp": "2024-01-15T14:45:00.000Z",
+  "data": {
+    "taskId": "65a1b2c3d4e5f6g7h8i9j0k1",
+    "title": "Complete project documentation",
+    "completionDate": "2024-01-15T14:45:00.000Z",
+    "userId": 1,
+    "category": "Work",
+    "tags": ["High Priority", "Documentation"]
+  }
+}
+```
+
+**Console Output**:
+```
+=== TASK COMPLETED WEBHOOK ===
+Task ID: 65a1b2c3d4e5f6g7h8i9j0k1
+Title: Complete project documentation
+User ID: 1
+Completed At: 2024-01-15T14:45:00.000Z
+==============================
+Sending webhook (attempt 1/3)...
+Webhook sent successfully: 200
+```
+
+**Configuration**:
+```env
+WEBHOOK_URL=https://webhook.site/your-unique-url
+WEBHOOK_RETRY_ATTEMPTS=3
+WEBHOOK_RETRY_DELAY=1000
+```
+
+### 5. Enhanced Filtering
+
+**Filter by multiple criteria**:
+```bash
+# By category
+GET /api/tasks?category=Work
+
+# By status
+GET /api/tasks?status=pending
+
+# By tags (single)
+GET /api/tasks?tags=High Priority
+
+# By tags (multiple)
+GET /api/tasks?tags=High Priority,Documentation
+
+# Combined
+GET /api/tasks?category=Work&status=pending&tags=High Priority
 ```
 
 ---
-
-### Error Responses
-
-The API uses standard HTTP status codes and returns consistent error responses:
-
-**400 Bad Request** - Validation errors
-```json
-{
-  "error": "Validation Error",
-  "details": [
-    "Email is required",
-    "Password must be at least 6 characters long"
-  ]
-}
-```
-
-**401 Unauthorized** - Authentication required or invalid
-```json
-{
-  "error": "Access denied. No token provided."
-}
-```
-```json
-{
-  "error": "Invalid token."
-}
-```
-```json
-{
-  "error": "Token expired."
-}
-```
-
-**404 Not Found** - Resource not found
-```json
-{
-  "error": "Task not found"
-}
-```
-
-**500 Internal Server Error** - Server error
-```json
-{
-  "error": "Internal Server Error"
-}
-```
-
----
-
-### Testing the API with Postman
-
-1. **Import the collection**: You can create a Postman collection with the endpoints above
-2. **Set up environment variables**:
-   - `base_url`: `http://localhost:3000`
-   - `token`: (will be set after login)
-3. **Test flow**:
-   - Register a user → Save the token
-   - Login → Update the token variable
-   - Create tasks → Use the token
-   - Get/Update/Delete tasks → Use the token
-
-**Postman Collection Structure**:
-```
-Task Management API
-├── Auth
-│   ├── Register
-│   ├── Login
-│   └── Get Profile
-├── Tasks
-│   ├── Create Task
-│   ├── Get All Tasks
-│   ├── Get Single Task
-│   ├── Update Task
-│   └── Delete Task
-└── Health Check
-```
 
 ## Project Structure
 
@@ -705,268 +644,167 @@ Task Management API
 task-management-api/
 ├── src/
 │   ├── controllers/          # Request handlers
-│   │   ├── authController.js    # User authentication logic
-│   │   └── taskController.js    # Task CRUD operations
+│   │   ├── authController.js
+│   │   └── taskController.js (enhanced)
 │   │
-│   ├── services/             # Business logic layer
-│   │   ├── authService.js       # Authentication business logic
-│   │   ├── taskService.js       # Task business logic
-│   │   └── userService.js       # User business logic
+│   ├── services/             # Business logic
+│   │   ├── authService.js
+│   │   ├── taskService.js (enhanced)
+│   │   ├── userService.js
+│   │   ├── reminderService.js    # NEW
+│   │   └── webhookService.js     # NEW
 │   │
 │   ├── models/               # Database models
-│   │   ├── User.js              # PostgreSQL user model
-│   │   └── Task.js              # MongoDB task schema
+│   │   ├── User.js
+│   │   └── Task.js (enhanced)
 │   │
-│   ├── routes/               # API route definitions
-│   │   ├── auth.js              # Authentication routes
-│   │   └── tasks.js             # Task routes
+│   ├── routes/               # API routes
+│   │   ├── auth.js
+│   │   └── tasks.js (enhanced)
 │   │
 │   ├── middleware/           # Custom middleware
-│   │   ├── auth.js              # JWT authentication middleware
-│   │   ├── errorHandler.js      # Global error handler
-│   │   └── validation.js        # Request validation middleware
+│   │   ├── auth.js
+│   │   ├── errorHandler.js
+│   │   └── validation.js
 │   │
 │   ├── utils/                # Utility functions
-│   │   ├── jwtUtils.js          # JWT token operations
-│   │   ├── paginationUtils.js   # Pagination helpers
-│   │   ├── responseUtils.js     # Response formatting
-│   │   └── validationSchemas.js # Joi validation schemas
+│   │   ├── jwtUtils.js
+│   │   ├── paginationUtils.js
+│   │   ├── responseUtils.js
+│   │   └── validationSchemas.js (enhanced)
 │   │
-│   ├── config/               # Configuration files
-│   │   └── database.js          # Database connections
+│   ├── config/               # Configuration
+│   │   └── database.js
 │   │
 │   └── app.js                # Express app setup
 │
-├── .env.example              # Environment variables template
-├── .gitignore                # Git ignore rules
-├── package.json              # Project dependencies
-├── server.js                 # Application entry point
-└── README.md                 # This file
+├── .env.example              # Environment template (enhanced)
+├── .gitignore
+├── package.json              # Dependencies (enhanced)
+├── server.js                 # Entry point (enhanced)
+├── README.md                 # This file
+│
+├── API_DOCUMENTATION_EXTENDED.md    # Detailed API docs
+├── DESIGN_DECISIONS.md              # Architecture docs
+├── SECURITY_AUDIT.md                # Security analysis
+├── SETUP_GUIDE.md                   # Setup instructions
+├── PROJECT_SUMMARY.md               # Project overview
+└── FINAL_CHECKLIST.md               # Implementation checklist
 ```
 
-### Folder Explanation
+### New Components
 
-**controllers/**
-- Handle HTTP requests and responses
-- Thin layer that delegates to services
-- Responsible for request/response formatting
-- Example: `authController.js` handles registration, login, and profile endpoints
+**reminderService.js**
+- In-memory queue for scheduled reminders
+- Periodic check for upcoming tasks
+- Handles reminder scheduling and cancellation
+- Sends console logs and webhook notifications
 
-**services/**
-- Contains business logic
-- Reusable across different controllers
-- Handles data validation and processing
-- Example: `taskService.js` manages task CRUD operations with user isolation
+**webhookService.js**
+- HTTP client for webhook delivery
+- Retry logic with exponential backoff
+- Handles both reminder and completion notifications
+- Graceful error handling
 
-**models/**
-- Define database schemas and models
-- PostgreSQL models use raw SQL queries with the `pg` library
-- MongoDB models use Mongoose schemas
-- Example: `User.js` handles password hashing and user queries
-
-**routes/**
-- Define API endpoints and HTTP methods
-- Connect routes to controllers
-- Apply middleware (authentication, validation)
-- Example: `tasks.js` defines all task-related endpoints
-
-**middleware/**
-- Reusable functions that process requests
-- `auth.js`: Verifies JWT tokens and attaches user to request
-- `errorHandler.js`: Catches and formats all errors
-- `validation.js`: Validates request bodies using Joi schemas
-
-**utils/**
-- Helper functions used across the application
-- JWT operations, pagination logic, validation schemas
-- Keeps code DRY (Don't Repeat Yourself)
-
-**config/**
-- Application configuration
-- Database connection setup for both PostgreSQL and MongoDB
-- Initializes database tables/collections on startup
+---
 
 ## Design Decisions
 
-### Why Two Databases?
+### Real-time Reminder System
 
-**PostgreSQL for Users**
-- Relational data with ACID compliance
-- Strong consistency for authentication data
-- Built-in unique constraints for emails
-- Better for structured, relational data
-- Excellent for user management and authentication
+**Hybrid Approach**: We use both in-memory scheduling and periodic database checks.
 
-**MongoDB for Tasks**
-- Flexible schema for task attributes
-- Better performance for document-based queries
-- Easy to add new fields without migrations
-- Natural fit for task data with varying attributes
-- Efficient for user-specific data isolation
+**In-Memory Queue**:
+- Instant scheduling when task is created
+- Low latency
+- Simple implementation
 
-### Architecture Pattern: MVC + Services
+**Periodic Database Check**:
+- Survives server restarts
+- Catches missed reminders
+- Database is source of truth
 
-We use a layered architecture that separates concerns:
+**Why Hybrid?**
+- Fast, immediate reminders for new tasks
+- Reliability and fault tolerance
+- Graceful degradation if in-memory queue fails
 
-1. **Routes** → Define endpoints
-2. **Middleware** → Validate and authenticate
-3. **Controllers** → Handle HTTP layer
-4. **Services** → Business logic
-5. **Models** → Data access
+### Webhook Integration
 
-**Benefits**:
-- Easy to test each layer independently
-- Business logic is reusable
-- Controllers stay thin and focused
-- Clear separation of concerns
-- Easier to maintain and scale
+**Exponential Backoff**: Retry schedule is 1s, 2s, 4s.
 
-### Authentication Strategy
+**Why?**
+- Network failures are often temporary
+- Gives external service time to recover
+- Industry standard pattern
 
-**JWT (JSON Web Tokens)**
-- Stateless authentication (no session storage needed)
-- Tokens contain user information
-- Can be easily scaled horizontally
-- Configurable expiration time
-- Industry standard for REST APIs
+**Security**:
+- HTTPS only
+- 5-second timeout
+- No sensitive data in payload
 
-**Why not sessions?**
-- Sessions require server-side storage
-- Harder to scale across multiple servers
-- JWT is more suitable for REST APIs
+### Task Categorization vs Tags
 
-### Validation Approach
+**Categories** (Structured):
+- Pre-defined list
+- Consistent across users
+- Better for analytics
+- One per task
 
-**Joi for Schema Validation**
-- Declarative validation rules
-- Reusable schemas
-- Clear error messages
-- Validates before hitting business logic
-- Reduces code duplication
+**Tags** (Flexible):
+- Free-form text
+- User-specific
+- Multiple per task
+- Better for custom workflows
 
-**Two-layer validation**:
-1. Joi validates request format and types
-2. Business logic validates business rules (e.g., unique email)
+**Why Both?**
+- Categories for broad organization
+- Tags for specific details
+- Best of both worlds
 
-### Error Handling Philosophy
-
-**Global Error Handler**
-- Catches all errors in one place
-- Consistent error response format
-- Proper HTTP status codes
-- Detailed error messages for debugging
-- Security: Doesn't expose sensitive information
-
-**Error Types Handled**:
-- Validation errors (400)
-- Authentication errors (401)
-- Not found errors (404)
-- Database errors (400/500)
-- JWT errors (401)
-- Generic server errors (500)
-
-### Security Measures
-
-1. **Password Security**
-   - Bcrypt hashing with 12 salt rounds
-   - Passwords never stored in plain text
-   - Passwords never returned in responses
-
-2. **JWT Security**
-   - Secret key stored in environment variables
-   - Configurable expiration time
-   - Token verification on protected routes
-
-3. **Input Validation**
-   - All inputs validated before processing
-   - SQL injection prevention (parameterized queries)
-   - NoSQL injection prevention (Mongoose sanitization)
-
-4. **User Isolation**
-   - Users can only access their own tasks
-   - All task queries filter by userId
-   - Authorization checks on every request
-
-5. **Environment Variables**
-   - All sensitive data in .env file
-   - .env file in .gitignore
-   - .env.example provided as template
-
-6. **CORS**
-   - Enabled for cross-origin requests
-   - Can be configured for specific origins in production
-
-### Code Organization Principles
-
-1. **Single Responsibility**: Each file/function has one clear purpose
-2. **DRY (Don't Repeat Yourself)**: Reusable utilities and services
-3. **Separation of Concerns**: Clear boundaries between layers
-4. **Modularity**: Easy to add/remove features
-5. **Readability**: Clean code without unnecessary comments
-
-### Why This Structure?
-
-**Scalability**
-- Easy to add new features
-- Can split into microservices if needed
-- Service layer can be reused in different contexts
-
-**Maintainability**
-- Clear file organization
-- Easy to find and fix bugs
-- New developers can understand quickly
-
-**Testability**
-- Each layer can be tested independently
-- Services can be unit tested
-- Controllers can be integration tested
-
-**Best Practices**
-- Follows industry standards
-- RESTful API design
-- Clean architecture principles
-- SOLID principles applied
+---
 
 ## Security
 
 ### Authentication Flow
-
 1. User registers or logs in
 2. Server generates JWT token with user ID
-3. Client stores token (localStorage, sessionStorage, or memory)
-4. Client includes token in Authorization header for protected routes
+3. Client stores token
+4. Client includes token in Authorization header
 5. Server verifies token and extracts user information
 6. Request proceeds if token is valid
 
 ### Password Handling
-
-- Passwords are hashed using bcrypt with 12 salt rounds
-- Original passwords are never stored
-- Password comparison is done using bcrypt's secure compare function
-- Passwords are never included in API responses
+- Passwords hashed using bcrypt with 12 salt rounds
+- Original passwords never stored
+- Passwords never returned in API responses
 
 ### Token Management
-
 - Tokens expire after configured time (default: 7 days)
-- Expired tokens are rejected with 401 status
-- Invalid tokens are rejected with 401 status
-- Token secret is stored securely in environment variables
+- Expired/invalid tokens rejected with 401 status
+- Token secret stored securely in environment variables
 
 ### Data Protection
-
-- User data is isolated (users can only access their own tasks)
+- User data isolated (users can only access their own tasks)
 - All database queries include user ID filtering
 - SQL injection prevented by parameterized queries
 - NoSQL injection prevented by Mongoose sanitization
 
-### Environment Variables
+### Webhook Security
+- HTTPS enforced
+- 5-second timeout prevents hanging
+- No sensitive data in payload (no passwords, tokens, emails)
+- Configurable webhook URL
 
+### Environment Variables
 Never commit sensitive data. Always use environment variables for:
 - Database credentials
 - JWT secret keys
+- Webhook URLs
 - API keys
-- Port numbers
-- Environment-specific configurations
+- Configuration values
+
+---
 
 ## Development
 
@@ -977,84 +815,79 @@ npm start          # Start production server
 npm run dev        # Start development server with nodemon
 ```
 
-### Adding New Features
+### Testing the New Features
 
-1. **Add a new route**: Create route file in `src/routes/`
-2. **Add controller**: Create controller in `src/controllers/`
-3. **Add service**: Create service in `src/services/`
-4. **Add validation**: Add schema in `src/utils/validationSchemas.js`
-5. **Register route**: Import and use in `src/app.js`
+1. **Test Task Creation with Categories and Tags**:
+   ```bash
+   curl -X POST http://localhost:3000/api/tasks \
+     -H "Authorization: Bearer YOUR_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "title": "Team meeting",
+       "description": "Quarterly review",
+       "dueDate": "2024-12-31T10:00:00.000Z",
+       "category": "Work",
+       "tags": ["Meeting", "High Priority"]
+     }'
+   ```
 
-### Common Development Tasks
+2. **Test Filtering by Category**:
+   ```bash
+   curl -X GET "http://localhost:3000/api/tasks?category=Work" \
+     -H "Authorization: Bearer YOUR_TOKEN"
+   ```
 
-**Add a new endpoint**:
-1. Define route in appropriate route file
-2. Create controller function
-3. Create service function (if needed)
-4. Add validation schema (if needed)
-5. Test the endpoint
+3. **Test Filtering by Tags**:
+   ```bash
+   curl -X GET "http://localhost:3000/api/tasks?tags=High Priority" \
+     -H "Authorization: Bearer YOUR_TOKEN"
+   ```
 
-**Add a new database model**:
-1. Create model file in `src/models/`
-2. Define schema/queries
-3. Export model
-4. Use in services
+4. **Test Task Completion (triggers webhook)**:
+   ```bash
+   curl -X PUT http://localhost:3000/api/tasks/TASK_ID \
+     -H "Authorization: Bearer YOUR_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"status": "completed"}'
+   ```
+   
+   Check your webhook.site URL to see the notification!
+
+5. **Test Reminder System**:
+   Create a task with due date 1 hour from now and watch the console for reminder output.
+
+---
 
 ## Troubleshooting
 
-### Server won't start
+### Webhook not working
+- Verify `WEBHOOK_URL` in `.env`
+- Check if webhook.site URL is valid
+- Look for webhook logs in console
 
-**Check database connections**:
-```bash
-# PostgreSQL
-psql -U your_username -d taskmanagement
+### Reminder not triggering
+- Task due date must be more than current time
+- Task status must be "pending"
+- Check `REMINDER_ADVANCE_TIME` configuration
+- Look for reminder logs in console
 
-# MongoDB
-mongosh
-```
+### Database connection errors
+- Ensure PostgreSQL is running: `pg_isready`
+- Ensure MongoDB is running: `mongosh`
+- Verify credentials in `.env`
 
-**Check environment variables**:
-- Ensure .env file exists
-- Verify all required variables are set
-- Check for typos in variable names
+---
 
-### Authentication errors
+## Additional Documentation
 
-**Token issues**:
-- Check if token is being sent in Authorization header
-- Verify token format: `Bearer <token>`
-- Check if token has expired
-- Verify JWT_SECRET matches between token generation and verification
+For more detailed information, see:
+- **API_DOCUMENTATION_EXTENDED.md** - Complete API reference with all endpoints
+- **DESIGN_DECISIONS.md** - Architecture and design rationale
+- **SECURITY_AUDIT.md** - Security analysis and best practices
+- **SETUP_GUIDE.md** - Detailed setup and deployment guide
+- **PROJECT_SUMMARY.md** - Project overview and metrics
 
-### Database errors
-
-**PostgreSQL**:
-- Verify database exists
-- Check user permissions
-- Ensure PostgreSQL service is running
-
-**MongoDB**:
-- Verify MongoDB service is running
-- Check connection string format
-- Ensure network access is allowed
-
-### Common Error Messages
-
-**"Access denied. No token provided."**
-- Include Authorization header with Bearer token
-
-**"Invalid token."**
-- Token is malformed or JWT_SECRET doesn't match
-
-**"Token expired."**
-- Generate a new token by logging in again
-
-**"User with this email already exists"**
-- Email is already registered, use a different email or login
-
-**"Task not found"**
-- Task doesn't exist or belongs to another user
-- Verify task ID is correct
+---
 
 ## Contributing
 
@@ -1064,15 +897,20 @@ mongosh
 4. Test thoroughly
 5. Submit a pull request
 
+---
+
 ## License
 
 This project is open source and available under the MIT License.
+
+---
 
 ## Support
 
 For issues, questions, or contributions, please open an issue on the repository.
 
 ---
+
 
 
 
