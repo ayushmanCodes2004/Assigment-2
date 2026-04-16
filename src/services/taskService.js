@@ -1,26 +1,40 @@
 const Task = require('../models/Task');
 const { getPaginationParams, buildPaginationResponse } = require('../utils/paginationUtils');
+const reminderService = require('./reminderService');
+const webhookService = require('./webhookService');
 
 class TaskService {
   async createTask(taskData, userId) {
     const task = new Task({
       ...taskData,
       userId,
-      status: taskData.status || 'pending'
+      status: taskData.status || 'pending',
+      category: taskData.category || 'Other',
+      tags: taskData.tags || []
     });
 
     await task.save();
+    await reminderService.scheduleTaskReminder(task._id);
+
     return task;
   }
 
   async getTasks(userId, filters = {}) {
-    const { status, page = 1, limit = 10 } = filters;
+    const { status, category, tags, page = 1, limit = 10 } = filters;
     const { skip, limit: itemsPerPage } = getPaginationParams(page, limit);
 
-    // Build filter
     const filter = { userId };
+    
     if (status && ['pending', 'completed'].includes(status)) {
       filter.status = status;
+    }
+
+    if (category) {
+      filter.category = category;
+    }
+
+    if (tags && tags.length > 0) {
+      filter.tags = { $in: Array.isArray(tags) ? tags : [tags] };
     }
 
     const tasks = await Task.find(filter)
@@ -51,14 +65,31 @@ class TaskService {
   }
 
   async updateTask(taskId, userId, updates) {
-    const task = await Task.findOneAndUpdate(
-      { _id: taskId, userId },
-      updates,
-      { new: true, runValidators: true }
-    );
+    const task = await Task.findOne({ _id: taskId, userId });
 
     if (!task) {
       throw new Error('TASK_NOT_FOUND');
+    }
+
+    const oldStatus = task.status;
+    const oldDueDate = task.dueDate;
+
+    Object.assign(task, updates);
+
+    if (updates.status === 'completed' && oldStatus !== 'completed') {
+      task.completedAt = new Date();
+      reminderService.cancelTaskReminder(taskId);
+      
+      await task.save();
+      await webhookService.sendTaskCompletionNotification(task);
+    } else {
+      await task.save();
+
+      if (updates.dueDate && updates.dueDate.toString() !== oldDueDate.toString()) {
+        task.reminderSent = false;
+        await task.save();
+        await reminderService.scheduleTaskReminder(taskId);
+      }
     }
 
     return task;
@@ -74,7 +105,31 @@ class TaskService {
       throw new Error('TASK_NOT_FOUND');
     }
 
+    reminderService.cancelTaskReminder(taskId);
+
     return task;
+  }
+
+  async getCategories() {
+    return ['Work', 'Personal', 'Urgent', 'Shopping', 'Health', 'Other'];
+  }
+
+  async getTasksByCategory(userId, category) {
+    const tasks = await Task.find({ userId, category }).sort({ createdAt: -1 });
+    return tasks;
+  }
+
+  async getAllTags(userId) {
+    const tasks = await Task.find({ userId });
+    const tagsSet = new Set();
+    
+    tasks.forEach(task => {
+      if (task.tags && task.tags.length > 0) {
+        task.tags.forEach(tag => tagsSet.add(tag));
+      }
+    });
+
+    return Array.from(tagsSet).sort();
   }
 }
 

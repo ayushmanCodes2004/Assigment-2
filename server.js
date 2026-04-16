@@ -1,6 +1,7 @@
 require('dotenv').config();
 const app = require('./src/app');
 const { connectMongoDB, initializePostgreSQL } = require('./src/config/database');
+const reminderService = require('./src/services/reminderService');
 
 const PORT = process.env.PORT || 3000;
 
@@ -8,6 +9,8 @@ const startServer = async () => {
   try {
     await initializePostgreSQL();
     await connectMongoDB();
+
+    reminderService.start();
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

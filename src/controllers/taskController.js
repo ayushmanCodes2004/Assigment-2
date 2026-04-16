@@ -2,9 +2,9 @@ const taskService = require('../services/taskService');
 
 const createTask = async (req, res, next) => {
   try {
-    const { title, description, dueDate, status } = req.body;
+    const { title, description, dueDate, status, category, tags } = req.body;
     const task = await taskService.createTask(
-      { title, description, dueDate, status },
+      { title, description, dueDate, status, category, tags },
       req.user.id
     );
 
@@ -19,8 +19,14 @@ const createTask = async (req, res, next) => {
 
 const getTasks = async (req, res, next) => {
   try {
-    const { status, page, limit } = req.query;
-    const result = await taskService.getTasks(req.user.id, { status, page, limit });
+    const { status, category, tags, page, limit } = req.query;
+    const result = await taskService.getTasks(req.user.id, { 
+      status, 
+      category, 
+      tags: tags ? (Array.isArray(tags) ? tags : tags.split(',')) : undefined,
+      page, 
+      limit 
+    });
 
     res.json(result);
   } catch (error) {
@@ -81,10 +87,30 @@ const deleteTask = async (req, res, next) => {
   }
 };
 
+const getCategories = async (req, res, next) => {
+  try {
+    const categories = await taskService.getCategories();
+    res.json({ categories });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getAllTags = async (req, res, next) => {
+  try {
+    const tags = await taskService.getAllTags(req.user.id);
+    res.json({ tags });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createTask,
   getTasks,
   getTaskById,
   updateTask,
-  deleteTask
+  deleteTask,
+  getCategories,
+  getAllTags
 };

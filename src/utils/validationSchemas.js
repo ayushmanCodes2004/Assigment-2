@@ -59,6 +59,17 @@ const taskSchema = Joi.object({
     .valid('pending', 'completed')
     .messages({
       'any.only': 'Status must be either "pending" or "completed"'
+    }),
+  category: Joi.string()
+    .valid('Work', 'Personal', 'Urgent', 'Shopping', 'Health', 'Other')
+    .messages({
+      'any.only': 'Category must be one of: Work, Personal, Urgent, Shopping, Health, Other'
+    }),
+  tags: Joi.array()
+    .items(Joi.string().trim().max(50))
+    .messages({
+      'array.base': 'Tags must be an array',
+      'string.max': 'Each tag cannot exceed 50 characters'
     })
 });
 
@@ -85,6 +96,17 @@ const taskUpdateSchema = Joi.object({
     .valid('pending', 'completed')
     .messages({
       'any.only': 'Status must be either "pending" or "completed"'
+    }),
+  category: Joi.string()
+    .valid('Work', 'Personal', 'Urgent', 'Shopping', 'Health', 'Other')
+    .messages({
+      'any.only': 'Category must be one of: Work, Personal, Urgent, Shopping, Health, Other'
+    }),
+  tags: Joi.array()
+    .items(Joi.string().trim().max(50))
+    .messages({
+      'array.base': 'Tags must be an array',
+      'string.max': 'Each tag cannot exceed 50 characters'
     })
 }).min(1).messages({
   'object.min': 'At least one field must be provided for update'
